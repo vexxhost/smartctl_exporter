@@ -2,13 +2,6 @@
 /.build
 /.release
 /.tarballs
-/.apko.lock.json
-/.melange-vars.json
-/melange.rsa
-/melange.rsa.pub
-/output*.tar
-/packages
-/sbom-*.spdx.json
 debug/
 .idea/
 

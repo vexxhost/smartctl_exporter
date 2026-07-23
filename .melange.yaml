@@ -5,8 +5,12 @@ package:
   description: Prometheus exporter for smartctl
   target-architecture:
     - x86_64
+    - aarch64
   copyright:
     - license: Apache-2.0
+  dependencies:
+    runtime:
+      - smartmontools
 
 environment:
   contents:
@@ -24,7 +28,6 @@ vars:
 pipeline:
   - uses: go/build
     with:
-      amd64: v1
       packages: .
       output: smartctl_exporter
       ldflags: >-
@@ -33,6 +36,7 @@ pipeline:
         -X github.com/prometheus/common/version.Revision=${{vars.revision}}
         -X github.com/prometheus/common/version.Branch=${{vars.branch}}
         -X github.com/prometheus/common/version.BuildUser=melange
+  - runs: chmod 0755 "${{targets.destdir}}/usr/bin/smartctl_exporter"
 
 test:
   pipeline:

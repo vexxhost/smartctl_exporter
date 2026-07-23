@@ -28,6 +28,8 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH="${TARGETARCH}" \
 
 FROM cgr.dev/chainguard/wolfi-base:latest
 
+LABEL io.prometheus.image.variant="a8e"
+
 RUN apk add --no-cache smartmontools
 
 COPY --from=build /out/smartctl_exporter /bin/smartctl_exporter

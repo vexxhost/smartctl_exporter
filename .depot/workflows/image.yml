@@ -11,6 +11,7 @@ on:
 
 env:
   DEPOT_PROJECT_ID: p3t28cts5g
+  DOCKERFILE_VARIANTS: Dockerfile
   DOCKER_REPO: packages.vexxhost.com
   DOCKER_IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || 'ci' }}
 

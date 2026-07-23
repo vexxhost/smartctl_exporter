@@ -1,0 +1,155 @@
+name: image
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Image and Git tag to publish, for example v0.14.0
+        required: true
+        type: string
+
+env:
+  DEPOT_PROJECT_ID: p3t28cts5g
+  IMAGE: packages.vexxhost.com/smartctl-exporter
+
+jobs:
+  build:
+    runs-on: depot-ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      build-id: ${{ steps.build.outputs.build-id }}
+      release-tag: ${{ steps.release.outputs.tag }}
+      tag-exists: ${{ steps.release.outputs.exists }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Validate release tag
+        if: github.event_name == 'workflow_dispatch'
+        id: release
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          if ! printf '%s\n' "${RELEASE_TAG}" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$'; then
+            echo "Release tag must look like v0.14.0 or v0.14.0-rc.1" >&2
+            exit 1
+          fi
+
+          existing_commit="$(git rev-list -n 1 "refs/tags/${RELEASE_TAG}" 2>/dev/null || true)"
+          if [ -n "${existing_commit}" ] && [ "${existing_commit}" != "${GITHUB_SHA}" ]; then
+            echo "Tag ${RELEASE_TAG} already points to ${existing_commit}, not ${GITHUB_SHA}" >&2
+            exit 1
+          fi
+
+          echo "tag=${RELEASE_TAG}" >> "${GITHUB_OUTPUT}"
+          if [ -n "${existing_commit}" ]; then
+            echo "exists=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "exists=false" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Build container binaries
+        run: make container-binaries
+
+      - uses: depot/setup-action@15c09a5f77a0840ad4bce955686522a257853461 # v1
+        with:
+          oidc: true
+
+      - name: Build multi-platform image
+        id: build
+        uses: depot/build-push-action@98e78adca7817480b8185f474a400b451d74e287 # v1
+        with:
+          context: .
+          project: ${{ env.DEPOT_PROJECT_ID }}
+          platforms: |
+            linux/amd64
+            linux/arm64
+          pull: true
+          save: true
+          sbom: true
+
+      - uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+        with:
+          version: v0.72.0
+          cache: true
+
+      - name: Pull image candidates
+        env:
+          BUILD_ID: ${{ steps.build.outputs.build-id }}
+        run: |
+          depot pull \
+            --project "${DEPOT_PROJECT_ID}" \
+            --platform linux/amd64 \
+            --tag smartctl-exporter:scan-amd64 \
+            "${BUILD_ID}"
+          depot pull \
+            --project "${DEPOT_PROJECT_ID}" \
+            --platform linux/arm64 \
+            --tag smartctl-exporter:scan-arm64 \
+            "${BUILD_ID}"
+
+      - name: Scan image candidates
+        run: |
+          trivy image \
+            --exit-code 1 \
+            --ignore-unfixed \
+            --scanners vuln,secret \
+            --severity HIGH,CRITICAL \
+            smartctl-exporter:scan-amd64
+          trivy image \
+            --exit-code 1 \
+            --ignore-unfixed \
+            --scanners vuln,secret \
+            --severity HIGH,CRITICAL \
+            smartctl-exporter:scan-arm64
+
+  release:
+    if: github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: depot-ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: depot/setup-action@15c09a5f77a0840ad4bce955686522a257853461 # v1
+        with:
+          oidc: true
+
+      - name: Create release tag
+        if: needs.build.outputs.tag-exists != 'true'
+        env:
+          RELEASE_TAG: ${{ needs.build.outputs.release-tag }}
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git tag -a "${RELEASE_TAG}" -m "Release ${RELEASE_TAG}" "${GITHUB_SHA}"
+          git push origin "refs/tags/${RELEASE_TAG}"
+
+      - name: Log in to Pulp
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: packages.vexxhost.com
+          username: ${{ secrets.PULP_CONTAINER_USERNAME }}
+          password: ${{ secrets.PULP_CONTAINER_PASSWORD }}
+
+      - name: Publish image
+        env:
+          BUILD_ID: ${{ needs.build.outputs.build-id }}
+          RELEASE_TAG: ${{ needs.build.outputs.release-tag }}
+        run: |
+          depot push \
+            --project "${DEPOT_PROJECT_ID}" \
+            --tag "${IMAGE}:${RELEASE_TAG}" \
+            "${BUILD_ID}"

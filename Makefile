@@ -20,3 +20,14 @@ include Makefile.common
 STATICCHECK_IGNORE =
 
 DOCKER_IMAGE_NAME ?= smartctl-exporter
+
+CONTAINER_ARCHS ?= amd64 arm64
+
+.PHONY: container-binaries
+container-binaries: promu
+	@set -eu; \
+	for arch in $(CONTAINER_ARCHS); do \
+		echo ">> building linux/$$arch binary for container image"; \
+		GOOS=linux GOARCH=$$arch CGO_ENABLED=0 $(PROMU) build \
+			--prefix $(PREFIX)/.build/linux-$$arch $(PROMU_BINARIES); \
+	done

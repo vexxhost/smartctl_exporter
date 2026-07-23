@@ -79,7 +79,7 @@ jobs:
           docker run --rm \
             --entrypoint apko \
             --volume "${PWD}:${PWD}" \
-            --volume "${PWD}/packages:/work/packages" \
+            --volume "${PWD}/packages:/packages" \
             --workdir "${PWD}" \
             "${APKO_IMAGE}" \
             lock .apko.yaml \
@@ -98,7 +98,7 @@ jobs:
           source-date-epoch: ${{ steps.source.outputs.source-date-epoch }}
           keyring-append: ${{ github.workspace }}/melange.rsa.pub
           automount-src: ${{ github.workspace }}/packages
-          automount-dest: /work/packages
+          automount-dest: /packages
 
       - name: Verify image
         run: |
@@ -135,7 +135,7 @@ jobs:
           source-date-epoch: ${{ steps.source.outputs.source-date-epoch }}
           keyring-append: ${{ github.workspace }}/melange.rsa.pub
           automount-src: ${{ github.workspace }}/packages
-          automount-dest: /work/packages
+          automount-dest: /packages
           generic-user: ${{ secrets.PULP_CONTAINER_USERNAME }}
           generic-pass: ${{ secrets.PULP_CONTAINER_PASSWORD }}
 

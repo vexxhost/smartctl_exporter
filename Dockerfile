@@ -1,11 +1,13 @@
+ARG ARCH="amd64"
+ARG OS="linux"
 FROM alpine:3
 LABEL maintainer="The Prometheus Authors <prometheus-developers@googlegroups.com>"
 
 RUN apk add smartmontools
 
-ARG TARGETARCH
-ARG TARGETOS
-COPY .build/${TARGETOS}-${TARGETARCH}/smartctl_exporter /bin/smartctl_exporter
+ARG ARCH="amd64"
+ARG OS="linux"
+COPY .build/${OS}-${ARCH}/smartctl_exporter /bin/smartctl_exporter
 
 EXPOSE      9633
 USER        nobody

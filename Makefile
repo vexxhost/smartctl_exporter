@@ -21,13 +21,8 @@ STATICCHECK_IGNORE =
 
 DOCKER_IMAGE_NAME ?= smartctl-exporter
 
-CONTAINER_ARCHS ?= amd64 arm64
-
-.PHONY: container-binaries
-container-binaries: promu
-	@set -eu; \
-	for arch in $(CONTAINER_ARCHS); do \
-		echo ">> building linux/$$arch binary for container image"; \
-		GOOS=linux GOARCH=$$arch CGO_ENABLED=0 $(PROMU) build \
-			--prefix $(PREFIX)/.build/linux-$$arch $(PROMU_BINARIES); \
-	done
+.PHONY: container-binary
+container-binary: promu
+	@echo ">> building linux/amd64 binary for container image"
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(PROMU) build \
+		--prefix $(PREFIX)/.build/linux-amd64 $(PROMU_BINARIES)

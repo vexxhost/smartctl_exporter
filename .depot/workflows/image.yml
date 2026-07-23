@@ -1,0 +1,57 @@
+name: image
+
+on:
+  pull_request:
+  push:
+    tags: ['v*']
+
+jobs:
+  build:
+    runs-on: depot-ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        id: meta
+        with:
+          images: packages.vexxhost.com/smartctl-exporter
+          tags: |
+            type=semver,pattern={{version}}
+            type=sha,enable=${{ github.event_name == 'pull_request' }}
+      - uses: depot/build-push-action@98e78adca7817480b8185f474a400b451d74e287 # v1.18.0
+        id: build
+        with:
+          file: Dockerfile.cgr
+          load: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            REVISION=${{ github.sha }}
+            BRANCH=${{ github.ref_name }}
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ fromJSON(steps.build.outputs.metadata)["image.name"] }}
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: 1
+      - uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        if: github.event_name == 'push'
+        with:
+          registry: packages.vexxhost.com
+          username: ${{ secrets.PULP_CONTAINER_USERNAME }}
+          password: ${{ secrets.PULP_CONTAINER_PASSWORD }}
+      - uses: depot/build-push-action@98e78adca7817480b8185f474a400b451d74e287 # v1.18.0
+        if: github.event_name == 'push'
+        with:
+          file: Dockerfile.cgr
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            REVISION=${{ github.sha }}
+            BRANCH=${{ github.ref_name }}

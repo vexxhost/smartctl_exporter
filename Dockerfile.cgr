@@ -1,18 +1,11 @@
-FROM cgr.dev/chainguard/wolfi-base:latest AS build
-
-RUN apk add --no-cache go
-
+FROM cgr.dev/chainguard/go AS build
 WORKDIR /src
-
 COPY go.mod go.sum ./
 RUN go mod download
-
 COPY . .
-
 ARG VERSION
 ARG REVISION
 ARG BRANCH
-
 RUN CGO_ENABLED=0 go build \
     -trimpath \
     -ldflags="-s \
@@ -20,17 +13,13 @@ RUN CGO_ENABLED=0 go build \
       -X github.com/prometheus/common/version.Revision=${REVISION} \
       -X github.com/prometheus/common/version.Branch=${BRANCH} \
       -X github.com/prometheus/common/version.BuildUser=depot" \
-    -o /usr/bin/smartctl_exporter \
+    -o /bin/smartctl_exporter \
     .
 
 FROM cgr.dev/chainguard/wolfi-base:latest
-
-LABEL io.prometheus.image.variant="a8e"
-
+LABEL io.prometheus.image.variant="cgr"
 RUN apk add --no-cache smartmontools
-
-COPY --from=build /usr/bin/smartctl_exporter /usr/bin/smartctl_exporter
-
+COPY --from=build /bin/smartctl_exporter /bin/smartctl_exporter
 EXPOSE 9633
-
-ENTRYPOINT ["/usr/bin/smartctl_exporter"]
+USER nobody
+ENTRYPOINT ["/bin/smartctl_exporter"]

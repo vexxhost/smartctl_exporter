@@ -2,17 +2,8 @@ name: image
 
 on:
   pull_request:
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: Image tag to publish, for example v0.14.0
-        required: true
-        type: string
-
-env:
-  DEPOT_PROJECT_ID: p3t28cts5g
-  DOCKER_IMAGE: packages.vexxhost.com/smartctl-exporter
-  DOCKER_IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || 'ci' }}
+  push:
+    tags: ['v*']
 
 jobs:
   build:
@@ -21,61 +12,46 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Validate image tag
-        if: github.event_name == 'workflow_dispatch'
-        env:
-          RELEASE_TAG: ${{ inputs.tag }}
-        run: |
-          if ! printf '%s\n' "${RELEASE_TAG}" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$'; then
-            echo "Image tag must look like v0.14.0 or v0.14.0-rc.1" >&2
-            exit 1
-          fi
-          if [ "${RELEASE_TAG}" != "v$(cat VERSION)" ]; then
-            echo "Image tag ${RELEASE_TAG} does not match VERSION v$(cat VERSION)" >&2
-            exit 1
-          fi
-
-      - name: Build image
-        run: |
-          depot build \
-            --build-arg "VERSION=$(cat VERSION)" \
-            --build-arg "REVISION=${GITHUB_SHA}" \
-            --build-arg "BRANCH=${GITHUB_REF_NAME}" \
-            --file Dockerfile.a8e \
-            --load \
-            --tag "${DOCKER_IMAGE}:${DOCKER_IMAGE_TAG}" \
-            .
-
-      - name: Verify image
-        run: |
-          image="${DOCKER_IMAGE}:${DOCKER_IMAGE_TAG}"
-          docker run --rm "${image}" --version
-          docker run --rm --entrypoint smartctl "${image}" --version
-          docker image inspect --format='Image size: {{.Size}} bytes' "${image}"
-
-      - uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+      - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        id: meta
         with:
-          version: v0.72.0
-          cache: true
-
-      - name: Scan image
-        run: |
-          trivy image \
-            --exit-code 1 \
-            --ignore-unfixed \
-            --scanners vuln,secret \
-            --severity HIGH,CRITICAL \
-            "${DOCKER_IMAGE}:${DOCKER_IMAGE_TAG}"
-
-      - name: Publish image
-        if: github.event_name == 'workflow_dispatch'
-        env:
-          PULP_CONTAINER_PASSWORD: ${{ secrets.PULP_CONTAINER_PASSWORD }}
-          PULP_CONTAINER_USERNAME: ${{ secrets.PULP_CONTAINER_USERNAME }}
-        run: |
-          printf '%s' "${PULP_CONTAINER_PASSWORD}" |
-            docker login packages.vexxhost.com \
-              --username "${PULP_CONTAINER_USERNAME}" \
-              --password-stdin
-          docker push "${DOCKER_IMAGE}:${DOCKER_IMAGE_TAG}"
+          images: packages.vexxhost.com/smartctl-exporter
+          tags: |
+            type=semver,pattern={{version}}
+            type=sha,enable=${{ github.event_name == 'pull_request' }}
+      - uses: depot/build-push-action@98e78adca7817480b8185f474a400b451d74e287 # v1.18.0
+        id: build
+        with:
+          file: Dockerfile.cgr
+          load: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            REVISION=${{ github.sha }}
+            BRANCH=${{ github.ref_name }}
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ fromJSON(steps.build.outputs.metadata)["image.name"] }}
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: 1
+      - uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        if: github.event_name == 'push'
+        with:
+          registry: packages.vexxhost.com
+          username: ${{ secrets.PULP_CONTAINER_USERNAME }}
+          password: ${{ secrets.PULP_CONTAINER_PASSWORD }}
+      - uses: depot/build-push-action@98e78adca7817480b8185f474a400b451d74e287 # v1.18.0
+        if: github.event_name == 'push'
+        with:
+          file: Dockerfile.cgr
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            REVISION=${{ github.sha }}
+            BRANCH=${{ github.ref_name }}

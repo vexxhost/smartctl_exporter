@@ -32,29 +32,18 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-
-      - name: Build binary
-        env:
-          CGO_ENABLED: 0
-          GOARCH: amd64
-          GOOS: linux
-        run: make build PREFIX="${PWD}/.build/linux-amd64"
-
       - name: Build and save image
         id: build
         uses: depot/build-push-action@98e78adca7817480b8185f474a400b451d74e287 # v1.18.0
         with:
           project: ${{ env.DEPOT_PROJECT_ID }}
           context: .
-          file: Dockerfile
+          file: Dockerfile.a8e
           platforms: linux/amd64
           build-args: |
-            ARCH=amd64
-            OS=linux
-            DISTROLESS_ARCH=amd64
+            VERSION=${{ env.DOCKER_IMAGE_TAG }}
+            REVISION=${{ github.sha }}
+            BRANCH=${{ github.ref_name }}
           tags: ${{ env.DOCKER_REPO }}/smartctl-exporter-linux-amd64:${{ env.DOCKER_IMAGE_TAG }}
           save: true
 
@@ -64,6 +53,13 @@ jobs:
           build-id: ${{ steps.build.outputs.build-id }}
           platform: linux/amd64
           tags: ${{ env.DOCKER_REPO }}/smartctl-exporter-linux-amd64:${{ env.DOCKER_IMAGE_TAG }}
+
+      - name: Verify image
+        run: |
+          image="${DOCKER_REPO}/smartctl-exporter-linux-amd64:${DOCKER_IMAGE_TAG}"
+          docker run --rm "${image}" --version
+          docker run --rm --entrypoint smartctl "${image}" --version
+          docker image inspect --format='Image size: {{.Size}} bytes' "${image}"
 
       - uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
         with:

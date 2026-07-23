@@ -64,13 +64,10 @@ jobs:
             keygen melange.rsa
           docker run --rm --privileged \
             --entrypoint melange \
-            --volume /var/run/docker.sock:/var/run/docker.sock \
-            --volume /tmp:/tmp \
             --volume "${PWD}:/work" \
             --workdir /work \
             "${APKO_IMAGE}" \
             build .melange.yaml \
-              --runner docker \
               --source-dir /work \
               --signing-key /work/melange.rsa \
               --git-commit "${GITHUB_SHA}" \

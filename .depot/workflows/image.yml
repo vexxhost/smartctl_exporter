@@ -75,13 +75,14 @@ jobs:
           pull: true
           save: true
           sbom: true
+          sbom-dir: sbom
 
       - uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
         with:
           version: v0.72.0
           cache: true
 
-      - name: Pull image candidates
+      - name: Pull image candidate
         env:
           BUILD_ID: ${{ steps.build.outputs.build-id }}
         run: |
@@ -90,13 +91,8 @@ jobs:
             --platform linux/amd64 \
             --tag smartctl-exporter:scan-amd64 \
             "${BUILD_ID}"
-          depot pull \
-            --project "${DEPOT_PROJECT_ID}" \
-            --platform linux/arm64 \
-            --tag smartctl-exporter:scan-arm64 \
-            "${BUILD_ID}"
 
-      - name: Scan image candidates
+      - name: Scan image candidate
         run: |
           trivy image \
             --exit-code 1 \
@@ -104,12 +100,16 @@ jobs:
             --scanners vuln,secret \
             --severity HIGH,CRITICAL \
             smartctl-exporter:scan-amd64
-          trivy image \
+          trivy sbom \
             --exit-code 1 \
             --ignore-unfixed \
-            --scanners vuln,secret \
             --severity HIGH,CRITICAL \
-            smartctl-exporter:scan-arm64
+            sbom/linux_amd64.spdx.json
+          trivy sbom \
+            --exit-code 1 \
+            --ignore-unfixed \
+            --severity HIGH,CRITICAL \
+            sbom/linux_arm64.spdx.json
 
   release:
     if: github.event_name == 'workflow_dispatch'

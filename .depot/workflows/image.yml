@@ -10,7 +10,6 @@ on:
         type: string
 
 env:
-  DEPOT_PROJECT_ID: p3t28cts5g
   IMAGE: packages.vexxhost.com/smartctl-exporter
   CANDIDATE_IMAGE: local/smartctl-exporter-linux-amd64:ci
 
@@ -36,16 +35,17 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - uses: depot/setup-action@15c09a5f77a0840ad4bce955686522a257853461 # v1
-
-      - name: Configure Docker to use Depot
-        run: depot configure-docker
-
       - name: Build image
+        env:
+          CGO_ENABLED: 0
+          GOARCH: amd64
+          GOOS: linux
         run: |
-          make image \
+          make build PREFIX="${PWD}/.build/linux-amd64"
+          make docker \
             DOCKER_REPO=local \
-            DOCKER_IMAGE_TAG=ci
+            DOCKER_IMAGE_TAG=ci \
+            DOCKERBUILD_CONTEXT="--load ."
 
       - uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
         with:

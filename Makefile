@@ -20,13 +20,3 @@ include Makefile.common
 STATICCHECK_IGNORE =
 
 DOCKER_IMAGE_NAME ?= smartctl-exporter
-
-.PHONY: container-binary
-container-binary: promu
-	@echo ">> building linux/amd64 binary for container image"
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(PROMU) build \
-		--prefix $(PREFIX)/.build/linux-amd64 $(PROMU_BINARIES)
-
-.PHONY: image
-image: container-binary
-	$(MAKE) docker DOCKERBUILD_CONTEXT="--load ."

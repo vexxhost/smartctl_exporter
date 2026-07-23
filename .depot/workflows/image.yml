@@ -5,12 +5,12 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Image and Git tag to publish, for example v0.14.0
+        description: Image tag to publish, for example v0.14.0
         required: true
         type: string
 
 env:
-  APKO_IMAGE: ghcr.io/wolfi-dev/sdk@sha256:d193240fabf5f395ee02d8ed3f2efe1071b401a64825069969a7189700ba5a6e
+  DEPOT_PROJECT_ID: p3t28cts5g
   DOCKER_IMAGE: packages.vexxhost.com/smartctl-exporter
   DOCKER_IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || 'ci' }}
 
@@ -21,8 +21,6 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
 
       - name: Validate image tag
         if: github.event_name == 'workflow_dispatch'
@@ -38,71 +36,20 @@ jobs:
             exit 1
           fi
 
-      - name: Prepare reproducible build inputs
-        id: source
-        run: |
-          package_version="$(awk '$1 == "version:" {print $2; exit}' .melange.yaml)"
-          if [ "${package_version}" != "$(cat VERSION)" ]; then
-            echo "Melange package ${package_version} does not match VERSION $(cat VERSION)" >&2
-            exit 1
-          fi
-          source_date_epoch="$(git show -s --format=%ct HEAD)"
-          echo "source-date-epoch=${source_date_epoch}" >> "${GITHUB_OUTPUT}"
-          jq -n \
-            --arg branch "${GITHUB_REF_NAME}" \
-            --arg revision "${GITHUB_SHA}" \
-            '{branch: $branch, revision: $revision}' \
-            > .melange-vars.json
-
-      - name: Build APK
-        run: |
-          docker run --rm \
-            --entrypoint melange \
-            --volume "${PWD}:/work" \
-            --workdir /work \
-            "${APKO_IMAGE}" \
-            keygen melange.rsa
-          docker run --rm --privileged \
-            --entrypoint melange \
-            --volume "${PWD}:/work" \
-            --workdir /work \
-            "${APKO_IMAGE}" \
-            build .melange.yaml \
-              --source-dir /work \
-              --signing-key /work/melange.rsa \
-              --git-commit "${GITHUB_SHA}" \
-              --git-repo-url "https://github.com/${GITHUB_REPOSITORY}" \
-              --license Apache-2.0 \
-              --vars-file /work/.melange-vars.json
-
-      - name: Lock image packages
-        run: |
-          docker run --rm \
-            --entrypoint apko \
-            --volume "${PWD}:${PWD}" \
-            --volume "${PWD}/packages:/packages" \
-            --workdir "${PWD}" \
-            "${APKO_IMAGE}" \
-            lock .apko.yaml \
-              --keyring-append "${PWD}/melange.rsa.pub" \
-              --output .apko.lock.json
-
       - name: Build image
-        uses: chainguard-images/actions/apko-build@a32d54a799f0b2d2e5a75f94805b2509cc898ae8
-        with:
-          apko-image: ${{ env.APKO_IMAGE }}
-          config: .apko.yaml
-          lockfile: .apko.lock.json
-          tag: ${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_IMAGE_TAG }}
-          source-date-epoch: ${{ steps.source.outputs.source-date-epoch }}
-          keyring-append: ${{ github.workspace }}/melange.rsa.pub
-          automount-src: ${{ github.workspace }}/packages
-          automount-dest: /packages
+        run: |
+          depot build \
+            --build-arg "VERSION=$(cat VERSION)" \
+            --build-arg "REVISION=${GITHUB_SHA}" \
+            --build-arg "BRANCH=${GITHUB_REF_NAME}" \
+            --file Dockerfile.a8e \
+            --load \
+            --tag "${DOCKER_IMAGE}:${DOCKER_IMAGE_TAG}" \
+            .
 
       - name: Verify image
         run: |
-          docker load --input output.tar
-          image="${DOCKER_IMAGE}:${DOCKER_IMAGE_TAG}-$(docker version --format '{{.Server.Arch}}')"
+          image="${DOCKER_IMAGE}:${DOCKER_IMAGE_TAG}"
           docker run --rm "${image}" --version
           docker run --rm --entrypoint smartctl "${image}" --version
           docker image inspect --format='Image size: {{.Size}} bytes' "${image}"
@@ -114,44 +61,21 @@ jobs:
 
       - name: Scan image
         run: |
-          tar --extract --to-stdout --file output.tar manifest.json |
-            jq --raw-output '.[].RepoTags[]' |
-            while read -r image; do
-              trivy image \
-                --exit-code 1 \
-                --ignore-unfixed \
-                --scanners vuln,secret \
-                --severity HIGH,CRITICAL \
-                "${image}"
-            done
+          trivy image \
+            --exit-code 1 \
+            --ignore-unfixed \
+            --scanners vuln,secret \
+            --severity HIGH,CRITICAL \
+            "${DOCKER_IMAGE}:${DOCKER_IMAGE_TAG}"
 
       - name: Publish image
-        id: publish
-        if: github.event_name == 'workflow_dispatch'
-        uses: chainguard-images/actions/apko-publish@a32d54a799f0b2d2e5a75f94805b2509cc898ae8
-        with:
-          apko-image: ${{ env.APKO_IMAGE }}
-          config: .apko.yaml
-          lockfile: .apko.lock.json
-          tag: ${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_IMAGE_TAG }}
-          source-date-epoch: ${{ steps.source.outputs.source-date-epoch }}
-          keyring-append: ${{ github.workspace }}/melange.rsa.pub
-          automount-src: ${{ github.workspace }}/packages
-          automount-dest: /packages
-          generic-user: ${{ secrets.PULP_CONTAINER_USERNAME }}
-          generic-pass: ${{ secrets.PULP_CONTAINER_PASSWORD }}
-
-      - name: Verify published image is reproducible
         if: github.event_name == 'workflow_dispatch'
         env:
-          PUBLISHED_DIGEST: ${{ steps.publish.outputs.digest }}
+          PULP_CONTAINER_PASSWORD: ${{ secrets.PULP_CONTAINER_PASSWORD }}
+          PULP_CONTAINER_USERNAME: ${{ secrets.PULP_CONTAINER_USERNAME }}
         run: |
-          local_digest="$(
-            tar --extract --to-stdout --file output.tar index.json |
-              sha256sum |
-              awk -v image="${DOCKER_IMAGE}" '{print image "@sha256:" $1}'
-          )"
-          if [ "${local_digest}" != "${PUBLISHED_DIGEST}" ]; then
-            echo "Scanned ${local_digest}, but published ${PUBLISHED_DIGEST}" >&2
-            exit 1
-          fi
+          printf '%s' "${PULP_CONTAINER_PASSWORD}" |
+            docker login packages.vexxhost.com \
+              --username "${PULP_CONTAINER_USERNAME}" \
+              --password-stdin
+          docker push "${DOCKER_IMAGE}:${DOCKER_IMAGE_TAG}"
